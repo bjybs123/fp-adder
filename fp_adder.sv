@@ -27,13 +27,13 @@ module fp_adder (
     logic is_fp2_denorm;
     logic larger_fp1_exp;
 
-    // component slicing
+    /* component slicing */
     always @ (*) begin
-        //fp1
+        /* fp1 */
         fp1_sign = i_fp1[31];
         fp1_exp = i_fp1[30:23];
         fp1_man = i_fp1[22:0];
-        //fp2
+        /* fp2 */
         fp2_sign = i_fp2[31];
         fp2_exp = i_fp2[30:23];
         fp2_man = i_fp2[22:0];
@@ -66,17 +66,29 @@ module fp_adder (
             else if(is_fp1_zero) begin
                 fp_sign = fp2_sign;
                 tmp_fp_exp = fp2_exp;
-                fp_man_carry = {2'b00, fp2_man};
+                if(is_fp2_denorm) begin
+                    fp_man_carry = {2'b00, fp2_man};
+                end
+                else begin
+                    fp_man_carry = {2'b01, fp2_man};
+                end
             end
             else begin
                 fp_sign = fp1_sign;
                 tmp_fp_exp = fp1_exp;
-                fp_man_carry = {2'b00, fp1_man};
+                if(is_fp1_denorm) begin
+                    fp_man_carry = {2'b00, fp1_man};
+                end
+                else begin
+                    fp_man_carry = {2'b01, fp1_man};
+                end
             end
         end
         else begin
             if(is_fp1_denorm || is_fp2_denorm) begin
                 if(is_fp1_denorm && is_fp2_denorm) begin
+                    /* |fp1| >= |fp2|*/
+                    tmp_fp_exp = 8'b0000_0000;
                     if(fp1_man >= fp2_man) begin
                         if((fp1_sign == 0) && (fp2_sign == 1)) begin
                             fp_sign = 0;
@@ -95,15 +107,15 @@ module fp_adder (
                     else begin
                         if((fp1_sign == 0) && (fp2_sign == 1)) begin
                             fp_sign = 1;
-                            fp_man_carry = {2'b01, fp2_man} - {2'b01, fp1_man};   // fp = -(fp2 - fp1)
+                            fp_man_carry = {2'b00, fp2_man} - {2'b00, fp1_man};   // fp = -(fp2 - fp1)
                         end
                         else if((fp1_sign == 1) && (fp2_sign == 0)) begin
                             fp_sign = 0;
-                            fp_man_carry = {2'b01, fp2_man} - {2'b01, fp1_man};   // fp = (fp2 - fp1)
+                            fp_man_carry = {2'b00, fp2_man} - {2'b00, fp1_man};   // fp = (fp2 - fp1)
                         end
                         else begin
                             fp_sign = fp2_sign;
-                            fp_man_carry = {2'b01, fp2_man} + {2'b01, fp1_man};   // fp = +-(fp1 + fp2)                   
+                            fp_man_carry = {2'b00, fp2_man} + {2'b00, fp1_man};   // fp = +-(fp1 + fp2)                   
                         end
                     end
                 end
@@ -185,8 +197,8 @@ module fp_adder (
                 end
                 /* |fp2| > |fp1| */
                 else if(fp2_exp > fp1_exp) begin
-                    tmp_fp_exp = fp2_exp;                                           // set exponent 
-                    fp1_man_align = {1'b1, fp1_man[22:1]} >> (fp2_exp - fp1_exp - 1);     // mantissa align
+                    tmp_fp_exp = fp2_exp;                                                   // set exponent 
+                    fp1_man_align = {1'b1, fp1_man[22:1]} >> (fp2_exp - fp1_exp - 1);       // mantissa align
                     /* fp1 + (-fp2) */
                     if((fp1_sign == 0) && (fp2_sign == 1)) begin
                         fp_sign = 1;
@@ -230,7 +242,11 @@ module fp_adder (
 
     /* making implicit leading 1 and check for exponent overflow and underflow */
     always @ (*) begin
-        if(fp_man_carry[24] == 1'b1) begin
+        if(tmp_fp_exp == 8'b0000_0000) begin
+                fp_exp = tmp_fp_exp;
+                fp_man = fp_man_carry;
+        end
+        else if(fp_man_carry[24] == 1'b1) begin
             if((tmp_fp_exp + 1) > 8'b1111_1110) begin
                 fp_exp = 8'b1111_1111;
                 fp_man = 0;
@@ -247,7 +263,11 @@ module fp_adder (
         else if(fp_man_carry[22] == 1'b1) begin
             if(({1'b1, tmp_fp_exp} - 1) < 9'b1_0000_0000) begin
                 fp_exp = 8'b0000_0000;
-                fp_man = fp_man_carry[22:0] << tmp_fp_exp;
+                fp_man = fp_man_carry[22:0] << (tmp_fp_exp - 1);
+            end
+            else if(({1'b1, tmp_fp_exp} - 1) == 9'b1_0000_0000) begin
+                fp_exp = 8'b0000_0000;
+                fp_man = 23'b111_1111_1111_1111_1111_1111;
             end
             else begin
                 fp_exp = tmp_fp_exp - 1;
@@ -257,7 +277,11 @@ module fp_adder (
         else if(fp_man_carry[21] == 1'b1) begin
             if(({1'b1, tmp_fp_exp} - 2) < 9'b1_0000_0000) begin
                 fp_exp = 8'b0000_0000;
-                fp_man = fp_man_carry[22:0] << tmp_fp_exp;
+                fp_man = fp_man_carry[22:0] << (tmp_fp_exp - 1);
+            end
+            else if(({1'b1, tmp_fp_exp} - 2) == 9'b1_0000_0000) begin
+                fp_exp = 8'b0000_0000;
+                fp_man = 23'b111_1111_1111_1111_1111_1111;
             end
             else begin
                 fp_exp = tmp_fp_exp - 2;
@@ -267,7 +291,11 @@ module fp_adder (
         else if(fp_man_carry[20] == 1'b1) begin
             if(({1'b1, tmp_fp_exp} - 3) < 9'b1_0000_0000) begin
                 fp_exp = 8'b0000_0000;
-                fp_man = fp_man_carry[22:0] << tmp_fp_exp;
+                fp_man = fp_man_carry[22:0] << (tmp_fp_exp - 1);
+            end
+            else if(({1'b1, tmp_fp_exp} - 3) == 9'b1_0000_0000) begin
+                fp_exp = 8'b0000_0000;
+                fp_man = 23'b111_1111_1111_1111_1111_1111;
             end
             else begin
                 fp_exp = tmp_fp_exp - 3;
@@ -277,7 +305,11 @@ module fp_adder (
         else if(fp_man_carry[19] == 1'b1) begin
             if(({1'b1, tmp_fp_exp} - 4) < 9'b1_0000_0000) begin
                 fp_exp = 8'b0000_0000;
-                fp_man = fp_man_carry[22:0] << tmp_fp_exp;
+                fp_man = fp_man_carry[22:0] << (tmp_fp_exp - 1);
+            end
+            else if(({1'b1, tmp_fp_exp} - 4) == 9'b1_0000_0000) begin
+                fp_exp = 8'b0000_0000;
+                fp_man = 23'b111_1111_1111_1111_1111_1111;
             end
             else begin
                 fp_exp = tmp_fp_exp - 4;
@@ -287,7 +319,11 @@ module fp_adder (
         else if(fp_man_carry[18] == 1'b1) begin
             if(({1'b1, tmp_fp_exp} - 5) < 9'b1_0000_0000) begin
                 fp_exp = 8'b0000_0000;
-                fp_man = fp_man_carry[22:0] << tmp_fp_exp;
+                fp_man = fp_man_carry[22:0] << (tmp_fp_exp - 1);
+            end
+            else if(({1'b1, tmp_fp_exp} - 5) == 9'b1_0000_0000) begin
+                fp_exp = 8'b0000_0000;
+                fp_man = 23'b111_1111_1111_1111_1111_1111;
             end
             else begin
                 fp_exp = tmp_fp_exp - 5;
@@ -297,7 +333,11 @@ module fp_adder (
         else if(fp_man_carry[17] == 1'b1) begin
             if(({1'b1, tmp_fp_exp} - 6) < 9'b1_0000_0000) begin
                 fp_exp = 8'b0000_0000;
-                fp_man = fp_man_carry[22:0] << tmp_fp_exp;
+                fp_man = fp_man_carry[22:0] << (tmp_fp_exp - 1);
+            end
+            else if(({1'b1, tmp_fp_exp} - 6) == 9'b1_0000_0000) begin
+                fp_exp = 8'b0000_0000;
+                fp_man = 23'b111_1111_1111_1111_1111_1111;
             end
             else begin
                 fp_exp = tmp_fp_exp - 6;
@@ -307,7 +347,11 @@ module fp_adder (
         else if(fp_man_carry[16] == 1'b1) begin
             if(({1'b1, tmp_fp_exp} - 7) < 9'b1_0000_0000) begin
                 fp_exp = 8'b0000_0000;
-                fp_man = fp_man_carry[22:0] << tmp_fp_exp;
+                fp_man = fp_man_carry[22:0] << (tmp_fp_exp - 1);
+            end
+            else if(({1'b1, tmp_fp_exp} - 7) == 9'b1_0000_0000) begin
+                fp_exp = 8'b0000_0000;
+                fp_man = 23'b111_1111_1111_1111_1111_1111;
             end
             else begin
                 fp_exp = tmp_fp_exp - 7;
@@ -317,7 +361,11 @@ module fp_adder (
         else if(fp_man_carry[15] == 1'b1) begin
             if(({1'b1, tmp_fp_exp} - 8) < 9'b1_0000_0000) begin
                 fp_exp = 8'b0000_0000;
-                fp_man = fp_man_carry[22:0] << tmp_fp_exp;
+                fp_man = fp_man_carry[22:0] << (tmp_fp_exp - 1);
+            end
+            else if(({1'b1, tmp_fp_exp} - 8) == 9'b1_0000_0000) begin
+                fp_exp = 8'b0000_0000;
+                fp_man = 23'b111_1111_1111_1111_1111_1111;
             end
             else begin
                 fp_exp = tmp_fp_exp - 8;
@@ -327,7 +375,11 @@ module fp_adder (
         else if(fp_man_carry[14] == 1'b1) begin
             if(({1'b1, tmp_fp_exp} - 9) < 9'b1_0000_0000) begin
                 fp_exp = 8'b0000_0000;
-                fp_man = fp_man_carry[22:0] << tmp_fp_exp;
+                fp_man = fp_man_carry[22:0] << (tmp_fp_exp - 1);
+            end
+            else if(({1'b1, tmp_fp_exp} - 9) == 9'b1_0000_0000) begin
+                fp_exp = 8'b0000_0000;
+                fp_man = 23'b111_1111_1111_1111_1111_1111;
             end
             else begin
                 fp_exp = tmp_fp_exp - 9;
@@ -337,7 +389,11 @@ module fp_adder (
         else if(fp_man_carry[13] == 1'b1) begin
             if(({1'b1, tmp_fp_exp} - 10) < 9'b1_0000_0000) begin
                 fp_exp = 8'b0000_0000;
-                fp_man = fp_man_carry[22:0] << tmp_fp_exp;
+                fp_man = fp_man_carry[22:0] << (tmp_fp_exp - 1);
+            end
+            else if(({1'b1, tmp_fp_exp} - 10) == 9'b1_0000_0000) begin
+                fp_exp = 8'b0000_0000;
+                fp_man = 23'b111_1111_1111_1111_1111_1111;
             end
             else begin
                 fp_exp = tmp_fp_exp - 10;
@@ -347,7 +403,11 @@ module fp_adder (
         else if(fp_man_carry[12] == 1'b1) begin
             if(({1'b1, tmp_fp_exp} - 11) < 9'b1_0000_0000) begin
                 fp_exp = 8'b0000_0000;
-                fp_man = fp_man_carry[22:0] << tmp_fp_exp;
+                fp_man = fp_man_carry[22:0] << (tmp_fp_exp - 1);
+            end
+            else if(({1'b1, tmp_fp_exp} - 11) == 9'b1_0000_0000) begin
+                fp_exp = 8'b0000_0000;
+                fp_man = 23'b111_1111_1111_1111_1111_1111;
             end
             else begin
                 fp_exp = tmp_fp_exp - 11;
@@ -357,7 +417,11 @@ module fp_adder (
         else if(fp_man_carry[11] == 1'b1) begin
             if(({1'b1, tmp_fp_exp} - 12) < 9'b1_0000_0000) begin
                 fp_exp = 8'b0000_0000;
-                fp_man = fp_man_carry[22:0] << tmp_fp_exp;
+                fp_man = fp_man_carry[22:0] << (tmp_fp_exp - 1);
+            end
+            else if(({1'b1, tmp_fp_exp} - 12) == 9'b1_0000_0000) begin
+                fp_exp = 8'b0000_0000;
+                fp_man = 23'b111_1111_1111_1111_1111_1111;
             end
             else begin
                 fp_exp = tmp_fp_exp - 12;
@@ -367,7 +431,11 @@ module fp_adder (
         else if(fp_man_carry[10] == 1'b1) begin
             if(({1'b1, tmp_fp_exp} - 13) < 9'b1_0000_0000) begin
                 fp_exp = 8'b0000_0000;
-                fp_man = fp_man_carry[22:0] << tmp_fp_exp;
+                fp_man = fp_man_carry[22:0] << (tmp_fp_exp - 1);
+            end
+            else if(({1'b1, tmp_fp_exp} - 13) == 9'b1_0000_0000) begin
+                fp_exp = 8'b0000_0000;
+                fp_man = 23'b111_1111_1111_1111_1111_1111;
             end
             else begin
                 fp_exp = tmp_fp_exp - 13;
@@ -377,7 +445,11 @@ module fp_adder (
         else if(fp_man_carry[9] == 1'b1) begin
             if(({1'b1, tmp_fp_exp} - 14) < 9'b1_0000_0000) begin
                 fp_exp = 8'b0000_0000;
-                fp_man = fp_man_carry[22:0] << tmp_fp_exp;
+                fp_man = fp_man_carry[22:0] << (tmp_fp_exp - 1);
+            end
+            else if(({1'b1, tmp_fp_exp} - 14) == 9'b1_0000_0000) begin
+                fp_exp = 8'b0000_0000;
+                fp_man = 23'b111_1111_1111_1111_1111_1111;
             end
             else begin
                 fp_exp = tmp_fp_exp - 14;
@@ -387,7 +459,11 @@ module fp_adder (
         else if(fp_man_carry[8] == 1'b1) begin
             if(({1'b1, tmp_fp_exp} - 15) < 9'b1_0000_0000) begin
                 fp_exp = 8'b0000_0000;
-                fp_man = fp_man_carry[22:0] << tmp_fp_exp;
+                fp_man = fp_man_carry[22:0] << (tmp_fp_exp - 1);
+            end
+            else if(({1'b1, tmp_fp_exp} - 15) == 9'b1_0000_0000) begin
+                fp_exp = 8'b0000_0000;
+                fp_man = 23'b111_1111_1111_1111_1111_1111;
             end
             else begin
                 fp_exp = tmp_fp_exp - 15;
@@ -397,7 +473,11 @@ module fp_adder (
         else if(fp_man_carry[7] == 1'b1) begin
             if(({1'b1, tmp_fp_exp} - 16) < 9'b1_0000_0000) begin
                 fp_exp = 8'b0000_0000;
-                fp_man = fp_man_carry[22:0] << tmp_fp_exp;
+                fp_man = fp_man_carry[22:0] << (tmp_fp_exp - 1);
+            end
+            else if(({1'b1, tmp_fp_exp} - 16) == 9'b1_0000_0000) begin
+                fp_exp = 8'b0000_0000;
+                fp_man = 23'b111_1111_1111_1111_1111_1111;
             end
             else begin
                 fp_exp = tmp_fp_exp - 16;
@@ -407,7 +487,11 @@ module fp_adder (
         else if(fp_man_carry[6] == 1'b1) begin
             if(({1'b1, tmp_fp_exp} - 17) < 9'b1_0000_0000) begin
                 fp_exp = 8'b0000_0000;
-                fp_man = fp_man_carry[22:0] << tmp_fp_exp;
+                fp_man = fp_man_carry[22:0] << (tmp_fp_exp - 1);
+            end
+            else if(({1'b1, tmp_fp_exp} - 17) == 9'b1_0000_0000) begin
+                fp_exp = 8'b0000_0000;
+                fp_man = 23'b111_1111_1111_1111_1111_1111;
             end
             else begin
                 fp_exp = tmp_fp_exp - 17;
@@ -417,7 +501,11 @@ module fp_adder (
         else if(fp_man_carry[5] == 1'b1) begin
             if(({1'b1, tmp_fp_exp} - 18) < 9'b1_0000_0000) begin
                 fp_exp = 8'b0000_0000;
-                fp_man = fp_man_carry[22:0] << tmp_fp_exp;
+                fp_man = fp_man_carry[22:0] << (tmp_fp_exp - 1);
+            end
+            else if(({1'b1, tmp_fp_exp} - 18) == 9'b1_0000_0000) begin
+                fp_exp = 8'b0000_0000;
+                fp_man = 23'b111_1111_1111_1111_1111_1111;
             end
             else begin
                 fp_exp = tmp_fp_exp - 18;
@@ -427,7 +515,11 @@ module fp_adder (
         else if(fp_man_carry[4] == 1'b1) begin
             if(({1'b1, tmp_fp_exp} - 19) < 9'b1_0000_0000) begin
                 fp_exp = 8'b0000_0000;
-                fp_man = fp_man_carry[22:0] << tmp_fp_exp;
+                fp_man = fp_man_carry[22:0] << (tmp_fp_exp - 1);
+            end
+            else if(({1'b1, tmp_fp_exp} - 19) == 9'b1_0000_0000) begin
+                fp_exp = 8'b0000_0000;
+                fp_man = 23'b111_1111_1111_1111_1111_1111;
             end
             else begin
                 fp_exp = tmp_fp_exp - 19;
@@ -437,7 +529,11 @@ module fp_adder (
         else if(fp_man_carry[3] == 1'b1) begin
             if(({1'b1, tmp_fp_exp} - 20) < 9'b1_0000_0000) begin
                 fp_exp = 8'b0000_0000;
-                fp_man = fp_man_carry[22:0] << tmp_fp_exp;
+                fp_man = fp_man_carry[22:0] << (tmp_fp_exp - 1);
+            end
+            else if(({1'b1, tmp_fp_exp} - 20) == 9'b1_0000_0000) begin
+                fp_exp = 8'b0000_0000;
+                fp_man = 23'b111_1111_1111_1111_1111_1111;
             end
             else begin
                 fp_exp = tmp_fp_exp - 20;
@@ -447,7 +543,11 @@ module fp_adder (
         else if(fp_man_carry[2] == 1'b1) begin
             if(({1'b1, tmp_fp_exp} - 21) < 9'b1_0000_0000) begin
                 fp_exp = 8'b0000_0000;
-                fp_man = fp_man_carry[22:0] << tmp_fp_exp;
+                fp_man = fp_man_carry[22:0] << (tmp_fp_exp - 1);
+            end
+            else if(({1'b1, tmp_fp_exp} - 21) == 9'b1_0000_0000) begin
+                fp_exp = 8'b0000_0000;
+                fp_man = 23'b111_1111_1111_1111_1111_1111;
             end
             else begin
                 fp_exp = tmp_fp_exp - 21;
@@ -457,7 +557,11 @@ module fp_adder (
         else if(fp_man_carry[1] == 1'b1) begin
             if(({1'b1, tmp_fp_exp} - 22) < 9'b1_0000_0000) begin
                 fp_exp = 8'b0000_0000;
-                fp_man = fp_man_carry[22:0] << tmp_fp_exp;
+                fp_man = fp_man_carry[22:0] << (tmp_fp_exp - 1);
+            end
+            else if(({1'b1, tmp_fp_exp} - 22) == 9'b1_0000_0000) begin
+                fp_exp = 8'b0000_0000;
+                fp_man = 23'b111_1111_1111_1111_1111_1111;
             end
             else begin
                 fp_exp = tmp_fp_exp - 22;
@@ -467,7 +571,11 @@ module fp_adder (
         else if(fp_man_carry[0] == 1'b1) begin
             if(({1'b1, tmp_fp_exp} - 23) < 9'b1_0000_0000) begin
                 fp_exp = 8'b0000_0000;
-                fp_man = fp_man_carry[22:0] << tmp_fp_exp;
+                fp_man = fp_man_carry[22:0] << (tmp_fp_exp - 1);
+            end
+            else if(({1'b1, tmp_fp_exp} - 23) == 9'b1_0000_0000) begin
+                fp_exp = 8'b0000_0000;
+                fp_man = 23'b111_1111_1111_1111_1111_1111;
             end
             else begin
                 fp_exp = tmp_fp_exp - 23;
